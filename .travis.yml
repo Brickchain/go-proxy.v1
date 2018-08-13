@@ -12,6 +12,7 @@ script:
 
 addons:
   artifacts:
+    s3_region: "eu-central-1"
     paths:
       - proxy-server-linux-amd64
       - proxy-client-${TRAVIS_OS_NAME}-amd64
