@@ -5,17 +5,15 @@ language: go
 go:
   - "1.10"
 
+before_script:
+  - pip install --user awscli
+
 script:
   - go test -v -cover $(go list ./... | grep -v /vendor/)
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-server-linux-amd64 cmd/proxy-server/main.go; fi
   - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
-
-addons:
-  artifacts:
-    s3_region: "eu-central-1"
-    paths:
-      - proxy-server-linux-amd64
-      - proxy-client-${TRAVIS_OS_NAME}-amd64
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then aws s3 cp proxy-server-linux-amd64 s3://${ARTIFACTS_BUCKET}/ ;fi
+  - aws s3 cp  proxy-client-${TRAVIS_OS_NAME}-amd64 s3://${ARTIFACTS_BUCKET}/ 
 
 notifications:
   email: false
