@@ -1,0 +1,14 @@
+os:
+  - linux
+  - osx
+language: go
+go:
+  - "1.10"
+
+script:
+  - go test -v -cover $(go list ./... | grep -v /vendor/)
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-server-linux-amd64 cmd/proxy-server/main.go; fi
+  - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
+
+notifications:
+  email: false
