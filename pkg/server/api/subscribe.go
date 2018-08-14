@@ -59,9 +59,9 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 	wg := sync.WaitGroup{}
 	done := make(chan struct{})
 
-	go func() {
-		<-r.Context().Done()
-	}()
+	// go func() {
+	// 	<-r.Context().Done()
+	// }()
 
 	addClient := func(r *proxy.RegistrationRequest) {
 		key, err := parseMandateToken(r.MandateToken)
@@ -127,10 +127,10 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 					close(done)
 					return
 				}
-			}
 
-			if err := c.clients.RenewTTL(client.ID); err != nil {
-				logger.Errorf("failed to renew TTL for %s: %s", client.ID, err)
+				if err := c.clients.RenewTTL(client.ID); err != nil {
+					logger.Errorf("failed to renew TTL for %s: %s", client.ID, err)
+				}
 			}
 		}
 	}
