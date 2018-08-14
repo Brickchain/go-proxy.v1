@@ -145,7 +145,7 @@ func (s *RedisSubscriber) Chan() chan string {
 }
 
 func (s *RedisSubscriber) Stop(timeout time.Duration) {
-	s.sub.Close()
+	// s.sub.Close()
 	// logger.Debug("Waiting for subscriber to die...")
 	start := time.Now()
 	s.done <- true
