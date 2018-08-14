@@ -160,7 +160,7 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 
 				go func() {
 					wg.Add(1)
-					wg.Done()
+					defer wg.Done()
 					docType, err := document.GetType(body)
 					if err != nil {
 						logger.Error("failed to get type of document: ", err)

@@ -40,7 +40,7 @@ func main() {
 	viper.SetDefault("cache", "inmem")
 	viper.SetDefault("redis", "localhost:6379")
 	viper.SetDefault("pubsub", "inmem")
-	viper.SetDefault("domain", "r.localhost:6519")
+	viper.SetDefault("domain", "")
 
 	logger.SetOutput(os.Stdout)
 	logger.SetFormatter(viper.GetString("log_formatter"))
