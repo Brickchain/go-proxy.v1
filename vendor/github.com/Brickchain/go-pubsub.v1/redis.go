@@ -131,7 +131,7 @@ func (s *RedisSubscriber) Pull(timeout time.Duration) (string, int) {
 	var msg string
 	select {
 	case msg = <-s.output:
-	case <-time.After(time.Second * timeout):
+	case <-time.After(timeout):
 	}
 	if msg == "" {
 		return "", TIMEOUT
