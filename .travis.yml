@@ -1,19 +1,31 @@
 os:
-  - linux
-  - osx
+- linux
+- osx
 language: go
 go:
-  - "1.10"
+  - '1.10'
+
+env:
+  - VERSION=0.1.${TRAVIS_BUILD_NUMBER}
 
 before_script:
   - pip install --user awscli
 
 script:
   - go test -v -cover $(go list ./... | grep -v /vendor/)
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-server-linux-amd64 cmd/proxy-server/main.go; fi
-  - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then aws s3 cp proxy-server-linux-amd64 s3://${ARTIFACTS_BUCKET}/ ;fi
-  - aws s3 cp  proxy-client-${TRAVIS_OS_NAME}-amd64 s3://${ARTIFACTS_BUCKET}/ 
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-server-${VERSION}-linux-amd64 cmd/proxy-server/main.go; fi
+  - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then aws s3 cp proxy-server-${VERSION}-linux-amd64 s3://${ARTIFACTS_BUCKET}/ ;fi
+  - aws s3 cp  proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 s3://${ARTIFACTS_BUCKET}/
+
+after_script:
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then curl --request POST \
+    --form token=${GITLAB_TOKEN} \
+    --form ref=master \
+    --form "variables[VERSION]=${VERSION}" \
+      $GITLAB_ADDRESS ;fi
 
 notifications:
   email: false
+  slack:
+    secure: "$SLACK_TOKEN"
