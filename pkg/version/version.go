@@ -3,4 +3,4 @@
 package version
 
 // Version number
-const Version = ""
+var Version = ""

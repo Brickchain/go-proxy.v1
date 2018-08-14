@@ -57,7 +57,7 @@ func main() {
 		},
 	}
 
-	logger.Info("server starting at " + addr)
+	logger.Infof("server with version %s starting at %s", version.Version, addr)
 	if err := server.ListenAndServe(); err != nil {
 		logger.Fatal(err)
 	}
