@@ -9,7 +9,8 @@ env:
   - VERSION=0.1.${TRAVIS_BUILD_NUMBER}
 
 before_script:
-  - pip install --user awscli
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then pip install --user awscli; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install awscli; fi
 
 script:
   - go test -v -cover $(go list ./... | grep -v /vendor/)
