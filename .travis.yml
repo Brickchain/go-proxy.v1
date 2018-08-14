@@ -19,10 +19,10 @@ script:
   - aws s3 cp  proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 s3://${ARTIFACTS_BUCKET}/
 
 after_script:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then curl --request POST \
-    --form token=${GITLAB_TOKEN} \
-    --form ref=master \
-    --form "variables[VERSION]=${VERSION}" \
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then curl -X POST \
+    -F token=${GITLAB_TOKEN} \
+    -F ref=master \
+    -F "variables[VERSION]=${VERSION}" \
       $GITLAB_ADDRESS ;fi
 
 notifications:
