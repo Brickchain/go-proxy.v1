@@ -14,8 +14,8 @@ before_script:
 
 script:
   - go test -v -cover $(go list ./... | grep -v /vendor/)
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-X github.com/Brickchain/go-proxy.v1/pkg/version.Version=$VERSION -extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-server-${VERSION}-linux-amd64 cmd/proxy-server/main.go; fi
-  - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-X github.com/Brickchain/go-proxy.v1/pkg/version.Version=$VERSION -extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags "-X github.com/Brickchain/go-proxy.v1/pkg/version.Version=$VERSION -extldflags '-static'" -gcflags "all=-trimpath=$GOPATH" -o proxy-server-${VERSION}-linux-amd64 cmd/proxy-server/main.go; fi
+  - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags "-X github.com/Brickchain/go-proxy.v1/pkg/version.Version=$VERSION -extldflags '-static'" -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then aws s3 cp proxy-server-${VERSION}-linux-amd64 s3://${ARTIFACTS_BUCKET}/ ;fi
   - aws s3 cp  proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 s3://${ARTIFACTS_BUCKET}/
 
