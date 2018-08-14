@@ -1,6 +1,6 @@
-//go:generate sh -c "sed -i \"s/const Version = \\\".*\\\"/const Version = \\\"`git describe --always --abbrev=12`\\\"/\" version.go"
+//go:generate sh -c "sed -i \"s/const Version = \\\".*\\\"/const Version = \\\"`echo $VERSION`\\\"/\" version.go"
 
 package version
 
-// Version git version number
+// Version number
 const Version = ""

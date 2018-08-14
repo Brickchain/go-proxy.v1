@@ -13,6 +13,7 @@ before_script:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install awscli; fi
 
 script:
+  - go generate pkg/version/version.go
   - go test -v -cover $(go list ./... | grep -v /vendor/)
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-server-${VERSION}-linux-amd64 cmd/proxy-server/main.go; fi
   - GOARCH=amd64 CGO_ENABLED=0 go build -tags netgo -ldflags '-extldflags "-static"' -gcflags "all=-trimpath=$GOPATH" -o proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 cmd/proxy-client/main.go
