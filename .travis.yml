@@ -3,7 +3,7 @@ os:
 - osx
 language: go
 go:
-  - '1.10'
+- '1.10'
 
 env:
   - VERSION=0.1.${TRAVIS_BUILD_NUMBER}
@@ -20,13 +20,10 @@ script:
   - aws s3 cp  proxy-client-${VERSION}-${TRAVIS_OS_NAME}-amd64 s3://${ARTIFACTS_BUCKET}/
 
 after_script:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then curl -X POST -o /dev/null
-    -F token=${GITLAB_TOKEN}
-    -F ref=master
-    -F "variables[VERSION]=${VERSION}"
-      $GITLAB_ADDRESS ;fi
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then curl -X POST -o /dev/null -F token=${GITLAB_TOKEN}
+    -F ref=master -F "variables[VERSION]=${VERSION}" $GITLAB_ADDRESS ;fi
 
 notifications:
   email: false
   slack:
-    secure: "$SLACK_TOKEN"
+    secure: Gdm6uHfOo/hk8F8/RJqdzb5UgF+ox5hw4p+Wd4cA0SoP2UOeaUWfbERpzj16te1BHEonqVUD9wPkcSNf+Omxir2+Fj94GpVOhe78vRfSbeHkW2RruMY0/V/HmGhz6ypk9XF1inj4IsZ29jM9jD6ddbTs2jrodI/VpSQFZ0AxU/MDVoTKeIEX3k3vtPvt8rLiFJPvoeMJjL7IdK5dkZSgC5kWTKS246TazJMbWViymO5VaunHHEXEjR8Yn7C3RcLebTjtTCiy+iUjvAY/eQ6ZbDmMYb85u//msBQWHRJdQ4viYxOO9kIJJdluJxSaiF7d50jlW/NhZibHlPXoxlUFwW/REV6rX/6gBTFaBFyssNA6nq9jMQ+SuCLyU3jfbuJRKPH4pw5ipSd66SFeMyyQcigyboCOrQQT1a3CboUHUf64E5qEUUeQuHYj8nBBs0sS298Da9c28tdDvVg1DO8OJ2fET8iweeb9AoCl/lgZXbiN94EVJGeTceef3BaYEUm1MCIL9utAcHJsR4TJ33r5Q1z0ORMGh2BcIeGA5UKK2Mr35MDyi5cEDzupW9lrp9/UR4n9y8QLlx5NdIXIQ6vXZqC2abW7bTqfHbPQvG7gKaM67amwxSEvXvLPPx3xTLF5NDN5exYE2p3cTis+LbsNlpAYlee0AGMypQvq5BC4+74=
