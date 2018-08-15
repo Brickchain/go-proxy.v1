@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Brickchain/go-logger.v1"
+	logger "github.com/Brickchain/go-logger.v1"
 	"github.com/Brickchain/go-proxy.v1/pkg/server/clients"
 	"github.com/Brickchain/go-proxy.v1/pkg/version"
 
@@ -23,7 +23,6 @@ import (
 	"github.com/tylerb/graceful"
 
 	redis "github.com/go-redis/redis"
-	gorillaHandlers "github.com/gorilla/handlers"
 	"github.com/ulule/limiter"
 	"github.com/ulule/limiter/drivers/store/memory"
 	limiterredis "github.com/ulule/limiter/drivers/store/redis"
@@ -76,6 +75,11 @@ func loadHandler() http.Handler {
 	r := httphandler.NewRouter()
 	r.GET("/", wrappers.Wrap(api.Version))
 
+	subscribeController := api.NewSubscribeController(viper.GetString("domain"), clients, pubsub)
+	r.GET("/proxy/subscribe", wrappers.Wrap(subscribeController.SubscribeHandler))
+
+	apiHandler := httphandler.LoadMiddlewares(r, version.Version)
+
 	store, err := loadLimiterStore()
 	if err != nil {
 		logger.Fatal(err)
@@ -84,46 +88,48 @@ func loadHandler() http.Handler {
 		Period: 5 * time.Minute,
 		Limit:  500,
 	})
+	requestHandler := httphandler.NewRouter()
 	requestController := api.NewRequestController(viper.GetString("domain"), clients, pubsub, limiter)
-	r.GET("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	r.POST("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	r.PUT("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	r.DELETE("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	r.OPTIONS("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
+	requestHandler.GET("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
+	requestHandler.POST("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
+	requestHandler.PUT("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
+	requestHandler.DELETE("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
+	requestHandler.OPTIONS("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
 
-	subscribeController := api.NewSubscribeController(viper.GetString("domain"), clients, pubsub)
-	r.GET("/proxy/subscribe", wrappers.Wrap(subscribeController.SubscribeHandler))
-
-	handler := gorillaHandlers.CORS(gorillaHandlers.IgnoreOptions())(r)
-
+	domainHandler := httphandler.NewRouter()
 	if viper.GetString("domain") != "" {
-		dr := httphandler.NewRouter()
-		dr.GET("/*filepath", wrappers.Wrap(requestController.Handle))
-		dr.POST("/*filepath", wrappers.Wrap(requestController.Handle))
-		dr.PUT("/*filepath", wrappers.Wrap(requestController.Handle))
-		dr.DELETE("/*filepath", wrappers.Wrap(requestController.Handle))
-		dr.OPTIONS("/*filepath", wrappers.Wrap(requestController.Handle))
-
-		domainHandler := gorillaHandlers.CORS(gorillaHandlers.IgnoreOptions())(dr)
-
-		return &domainRouter{viper.GetString("domain"), handler, domainHandler}
+		domainHandler.GET("/*filepath", wrappers.Wrap(requestController.Handle))
+		domainHandler.POST("/*filepath", wrappers.Wrap(requestController.Handle))
+		domainHandler.PUT("/*filepath", wrappers.Wrap(requestController.Handle))
+		domainHandler.DELETE("/*filepath", wrappers.Wrap(requestController.Handle))
+		domainHandler.OPTIONS("/*filepath", wrappers.Wrap(requestController.Handle))
 	}
 
-	return handler
+	return &requestRouter{
+		domain:         viper.GetString("domain"),
+		apiHandler:     apiHandler,
+		requestHandler: requestHandler,
+		domainHandler:  domainHandler,
+	}
 }
 
-type domainRouter struct {
-	domain        string
-	handler       http.Handler
-	domainHandler http.Handler
+type requestRouter struct {
+	domain         string
+	apiHandler     http.Handler
+	requestHandler http.Handler
+	domainHandler  http.Handler
 }
 
-func (d *domainRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (d *requestRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	host := req.Host
-	if strings.HasSuffix(host, "."+d.domain) {
+	if d.domain != "" && strings.HasSuffix(host, "."+d.domain) {
 		d.domainHandler.ServeHTTP(w, req)
 	} else {
-		d.handler.ServeHTTP(w, req)
+		if strings.HasPrefix(req.URL.Path, "/proxy/request/") {
+			d.requestHandler.ServeHTTP(w, req)
+		} else {
+			d.apiHandler.ServeHTTP(w, req)
+		}
 	}
 }
 
