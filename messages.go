@@ -12,6 +12,7 @@ const SchemaBase = "https://proxy.brickchain.com/v1"
 type HttpRequest struct {
 	document.Base
 	URL     string            `json:"url"`
+	Query   string            `json:"query,omitempty"`
 	Headers map[string]string `json:"headers"`
 	Method  string            `json:"method"`
 	Body    string            `json:"body"`
@@ -97,6 +98,7 @@ func NewPing() *Ping {
 type WSRequest struct {
 	document.Base
 	URL     string            `json:"url"`
+	Query   string            `json:"query,omitempty"`
 	Headers map[string]string `json:"headers"`
 }
 

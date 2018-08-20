@@ -6,7 +6,6 @@ import (
 	"time"
 
 	cache "github.com/Brickchain/go-cache.v1"
-	logger "github.com/Brickchain/go-logger.v1"
 	"github.com/Brickchain/go-proxy.v1/pkg/server"
 	"github.com/pkg/errors"
 )
@@ -22,7 +21,7 @@ func NewClientService(cache cache.Cache) *ClientService {
 }
 
 func (c *ClientService) Get(id string) (*server.Client, error) {
-	logger.Debug("Get client: ", id)
+	// logger.Debug("Get client: ", id)
 	b, err := c.cache.Get(fmt.Sprintf("/proxy/clients/%s", id))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get client from cache")

@@ -110,7 +110,12 @@ var upgrader = websocket.Upgrader{
 }
 
 func (h *httpClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logger.Debugf("Request for %s%s", r.Host, r.URL.Path)
+	path := r.URL.Path
+	if r.URL.RawQuery != "" {
+		path = fmt.Sprintf("%s?%s", path, r.URL.RawQuery)
+	}
+
+	logger.Debugf("Request for %s%s", r.Host, path)
 
 	// This is a websocket upgrade request, so let's setup a websocket client towards that same path on HomeAssistant and proxy the messages
 	if strings.ToLower(r.Header.Get("Connection")) == "upgrade" && strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
@@ -130,7 +135,12 @@ func (h *httpClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(viper.GetString("local"), "https://") {
 			schema = "wss"
 		}
-		u := url.URL{Scheme: schema, Host: host, Path: r.URL.Path}
+		u := url.URL{
+			Scheme:   schema,
+			Host:     host,
+			Path:     r.URL.Path,
+			RawQuery: r.URL.RawQuery,
+		}
 
 		// Remove headers that we should not forward
 		headers := http.Header{}
@@ -194,7 +204,7 @@ func (h *httpClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(time.Millisecond * 10)
 		}
 	} else {
-		req, err := http.NewRequest(r.Method, fmt.Sprintf("%s%s", viper.GetString("local"), r.URL.Path), r.Body)
+		req, err := http.NewRequest(r.Method, fmt.Sprintf("%s%s", viper.GetString("local"), path), r.Body)
 		if err != nil {
 			logger.Error(err)
 			return

@@ -269,8 +269,9 @@ func (p *ProxyClient) subscribe() error {
 					r := &http.Request{
 						Method: req.Method,
 						URL: &url.URL{
-							Host: p.base,
-							Path: req.URL,
+							Host:     p.base,
+							Path:     req.URL,
+							RawQuery: req.Query,
 						},
 						RequestURI: req.URL,
 						Header:     make(http.Header),
@@ -347,7 +348,12 @@ func (p *ProxyClient) subscribe() error {
 					}
 				}
 
-				u := url.URL{Scheme: "ws", Host: strings.Replace(strings.Replace(p.base, "https://", "", 1), "http://", "", 1), Path: req.URL}
+				u := url.URL{
+					Scheme:   "ws",
+					Host:     strings.Replace(strings.Replace(p.base, "https://", "", 1), "http://", "", 1),
+					Path:     req.URL,
+					RawQuery: req.Query,
+				}
 
 				c, _, err := dialer.Dial(u.String(), headers)
 				if err != nil {
@@ -383,7 +389,7 @@ func (p *ProxyClient) subscribe() error {
 				for {
 					typ, body, err := c.ReadMessage()
 					if err != nil {
-						logger.Error("got error while reading message: %s\n", err)
+						logger.Errorf("got error while reading message: %s", err)
 
 						c.Close()
 
@@ -429,6 +435,10 @@ func (p *ProxyClient) subscribe() error {
 				c := p.ws[req.ID]
 				p.wsLock.Unlock()
 
+				if c == nil {
+					return
+				}
+
 				if err = c.WriteMessage(req.MessageType, []byte(req.Body)); err != nil {
 					fmt.Printf("got error while writing message: %s\n", err)
 
@@ -461,7 +471,9 @@ func (p *ProxyClient) subscribe() error {
 				p.wsLock.Lock()
 				c := p.ws[req.ID]
 
-				c.Close()
+				if c != nil {
+					c.Close()
+				}
 				delete(p.ws, req.ID)
 
 				p.wsLock.Unlock()

@@ -76,6 +76,8 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 
 		msg := proxy.NewWSRequest(params.ByName("filepath"))
 		msg.Headers = make(map[string]string)
+		msg.Query = r.URL.RawQuery
+
 		for k, v := range r.Header {
 			switch strings.ToUpper(k) {
 			case "CONNECTION":
@@ -204,6 +206,7 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 
 		msg := proxy.NewHttpRequest(params.ByName("filepath"))
 		msg.Headers = make(map[string]string)
+		msg.Query = r.URL.RawQuery
 		for k, v := range r.Header {
 			msg.Headers[k] = v[0]
 		}
