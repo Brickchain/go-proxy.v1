@@ -88,48 +88,12 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 			}
 		}
 
-		body, _ := json.Marshal(msg)
-
-		sub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/ws-responses/%s", msg.ID))
-		if err != nil {
-			http.Error(w, errors.Wrap(err, "failed to setup response listener").Error(), http.StatusInternalServerError)
-			return
-		}
-
-		msgSub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/ws-out/%s", msg.ID))
+		msgSub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/websocket/%s", msg.ID))
 		if err != nil {
 			http.Error(w, errors.Wrap(err, "failed to setup msg listener").Error(), http.StatusInternalServerError)
 			return
 		}
 		defer msgSub.Stop(time.Second * 1)
-
-		if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
-			http.Error(w, errors.Wrap(err, "failed to send").Error(), http.StatusInternalServerError)
-			return
-		}
-
-		respString, i := sub.Pull(time.Second * 10)
-		if i == pubsub.TIMEOUT {
-			http.Error(w, "timeout", http.StatusGatewayTimeout)
-			return
-		}
-		if i == pubsub.ERROR {
-			http.Error(w, "error", http.StatusInternalServerError)
-			return
-		}
-
-		resp := &proxy.WSResponse{}
-		if err := json.Unmarshal([]byte(respString), &resp); err != nil {
-			http.Error(w, errors.Wrap(err, "failed to unmarshal response").Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if !resp.OK {
-			http.Error(w, resp.Error, http.StatusInternalServerError)
-			conn.Close()
-			return
-		}
-		sub.Stop(time.Millisecond * 500)
 
 		done := make(chan bool)
 		teardown := make(chan bool)
@@ -158,6 +122,18 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 					}
 
 					switch b.Type {
+					case proxy.SchemaBase + "/ws-response.json":
+						m := proxy.WSResponse{}
+						if err := json.Unmarshal([]byte(mString), &m); err != nil {
+							logger.Error(err)
+							continue
+						}
+
+						if !m.OK {
+							http.Error(w, m.Error, http.StatusInternalServerError)
+							conn.Close()
+							return
+						}
 					case proxy.SchemaBase + "/ws-message.json":
 						m := proxy.WSMessage{}
 						if err := json.Unmarshal([]byte(mString), &m); err != nil {
@@ -180,6 +156,13 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 				time.Sleep(time.Millisecond * 10)
 			}
 		}()
+
+		body, _ := json.Marshal(msg)
+
+		if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
+			http.Error(w, errors.Wrap(err, "failed to send").Error(), http.StatusInternalServerError)
+			return
+		}
 
 		defer func() {
 			done <- true
