@@ -96,6 +96,13 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 			return
 		}
 
+		msgSub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/ws-out/%s", msg.ID))
+		if err != nil {
+			http.Error(w, errors.Wrap(err, "failed to setup msg listener").Error(), http.StatusInternalServerError)
+			return
+		}
+		defer msgSub.Stop(time.Second * 1)
+
 		if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
 			http.Error(w, errors.Wrap(err, "failed to send").Error(), http.StatusInternalServerError)
 			return
@@ -123,13 +130,6 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 			return
 		}
 		sub.Stop(time.Millisecond * 500)
-
-		msgSub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/ws-out/%s", msg.ID))
-		if err != nil {
-			http.Error(w, errors.Wrap(err, "failed to setup msg listener").Error(), http.StatusInternalServerError)
-			return
-		}
-		defer msgSub.Stop(time.Second * 1)
 
 		done := make(chan bool)
 		teardown := make(chan bool)

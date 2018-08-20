@@ -27,7 +27,7 @@ func main() {
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("local", "http://localhost:8080")
 	viper.SetDefault("local_url", "")
-	viper.SetDefault("proxy_endpoint", "http://localhost:6519")
+	viper.SetDefault("proxy_endpoint", "https://proxy.svc.integrity.app")
 	viper.SetDefault("key", "./proxy-client.pem")
 	viper.SetDefault("state", "")
 
