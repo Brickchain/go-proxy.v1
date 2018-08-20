@@ -194,7 +194,35 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 								fmt.Printf("could not publish message: %s\n", err)
 							}
 						}
+					case proxy.SchemaBase + "/ws-response.json":
+						r := &proxy.WSResponse{}
+						if err := json.Unmarshal(body, &r); err != nil {
+							fmt.Printf("could not unmarshal message: %s\n", err)
+							return
+						}
+						if err := c.pubsub.Publish(fmt.Sprintf("/proxy/ws-responses/%s", r.ID), string(body)); err != nil {
+							fmt.Printf("could not publish message: %s\n", err)
+						}
+					case proxy.SchemaBase + "/ws-message.json":
+						r := &proxy.WSMessage{}
+						if err := json.Unmarshal(body, &r); err != nil {
+							fmt.Printf("could not unmarshal message: %s\n", err)
+							return
+						}
+						if err := c.pubsub.Publish(fmt.Sprintf("/proxy/ws-out/%s", r.ID), string(body)); err != nil {
+							fmt.Printf("could not publish message: %s\n", err)
+						}
+					case proxy.SchemaBase + "/ws-teardown.json":
+						r := &proxy.WSTeardown{}
+						if err := json.Unmarshal(body, &r); err != nil {
+							fmt.Printf("could not unmarshal message: %s\n", err)
+							return
+						}
+						if err := c.pubsub.Publish(fmt.Sprintf("/proxy/ws-out/%s", r.ID), string(body)); err != nil {
+							fmt.Printf("could not publish message: %s\n", err)
+						}
 					}
+
 				}()
 			}
 			time.Sleep(time.Millisecond * 1)

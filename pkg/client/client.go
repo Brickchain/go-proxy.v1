@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	proxy "github.com/Brickchain/go-proxy.v1"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
+	"github.com/posener/wstest"
 	jose "gopkg.in/square/go-jose.v1"
 
 	document "github.com/Brickchain/go-document.v2"
@@ -39,6 +41,8 @@ type ProxyClient struct {
 	key         *jose.JsonWebKey
 	lastPing    time.Time
 	wg          sync.WaitGroup
+	ws          map[string]*websocket.Conn
+	wsLock      *sync.Mutex
 }
 
 func NewProxyClient(endpoint string) (*ProxyClient, error) {
@@ -49,6 +53,8 @@ func NewProxyClient(endpoint string) (*ProxyClient, error) {
 		lastPing:  time.Now(),
 		regDone:   &sync.WaitGroup{},
 		wg:        sync.WaitGroup{},
+		ws:        make(map[string]*websocket.Conn),
+		wsLock:    &sync.Mutex{},
 	}
 
 	p.regDone.Add(1)
@@ -312,6 +318,153 @@ func (p *ProxyClient) subscribe() error {
 						return
 					}
 				}
+			case proxy.SchemaBase + "/ws-request.json":
+				p.lastPing = time.Now()
+
+				if p.handler == nil {
+					logger.Error("No handler set, can't process ws-request")
+					return
+				}
+
+				req := &proxy.WSRequest{}
+				if err := json.Unmarshal(body, &req); err != nil {
+					logger.Error(errors.Wrap(err, "failed to unmarshal ws-request"))
+					return
+				}
+
+				dialer := wstest.NewDialer(p.handler)
+
+				headers := http.Header{}
+				for k, v := range req.Headers {
+					switch strings.ToUpper(k) {
+					case "CONNECTION":
+					case "UPGRADE":
+					case "SEC-WEBSOCKET-KEY":
+					case "SEC-WEBSOCKET-VERSION":
+					case "SEC-WEBSOCKET-EXTENSIONS":
+					default:
+						headers.Set(k, v)
+					}
+				}
+
+				u := url.URL{Scheme: "ws", Host: strings.Replace(strings.Replace(p.base, "https://", "", 1), "http://", "", 1), Path: req.URL}
+
+				c, _, err := dialer.Dial(u.String(), headers)
+				if err != nil {
+					err = errors.Wrap(err, "failed to dial websocket")
+					logger.Error(err)
+
+					res := proxy.NewWSResponse(req.ID, false)
+					res.Error = err.Error()
+
+					b, _ := json.Marshal(res)
+
+					if err := p.write(b); err != nil {
+						logger.Error(errors.Wrap(err, "failed to send ws-response"))
+						disconnect()
+						return
+					}
+
+					return
+				}
+
+				p.wsLock.Lock()
+				p.ws[req.ID] = c
+				p.wsLock.Unlock()
+
+				b, _ := json.Marshal(proxy.NewWSResponse(req.ID, true))
+
+				if err := p.write(b); err != nil {
+					logger.Error(errors.Wrap(err, "failed to send ws-response"))
+					disconnect()
+					return
+				}
+
+				for {
+					typ, body, err := c.ReadMessage()
+					if err != nil {
+						logger.Error("got error while reading message: %s\n", err)
+
+						c.Close()
+
+						p.wsLock.Lock()
+						delete(p.ws, req.ID)
+						p.wsLock.Unlock()
+
+						t := proxy.NewWSTeardown(req.ID)
+						b, _ := json.Marshal(t)
+						p.write(b)
+
+						return
+					}
+
+					res := proxy.NewWSMessage(req.ID)
+					res.MessageType = typ
+					res.Body = string(body)
+
+					b, _ := json.Marshal(res)
+
+					// logger.Debugf("Sending response: %s", b)
+					if err := p.write(b); err != nil {
+						logger.Error(errors.Wrap(err, "failed to send ws-message"))
+						disconnect()
+						return
+					}
+				}
+			case proxy.SchemaBase + "/ws-message.json":
+				p.lastPing = time.Now()
+
+				if p.handler == nil {
+					logger.Error("No handler set, can't process ws-message")
+					return
+				}
+
+				req := &proxy.WSMessage{}
+				if err := json.Unmarshal(body, &req); err != nil {
+					logger.Error(errors.Wrap(err, "failed to unmarshal ws-message"))
+					return
+				}
+
+				p.wsLock.Lock()
+				c := p.ws[req.ID]
+				p.wsLock.Unlock()
+
+				if err = c.WriteMessage(req.MessageType, []byte(req.Body)); err != nil {
+					fmt.Printf("got error while writing message: %s\n", err)
+
+					c.Close()
+
+					p.wsLock.Lock()
+					delete(p.ws, req.ID)
+					p.wsLock.Unlock()
+
+					t := proxy.NewWSTeardown(req.ID)
+					b, _ := json.Marshal(t)
+					p.write(b)
+
+					return
+				}
+			case proxy.SchemaBase + "/ws-teardown.json":
+				p.lastPing = time.Now()
+
+				if p.handler == nil {
+					logger.Error("No handler set, can't process ws-message")
+					return
+				}
+
+				req := &proxy.WSTeardown{}
+				if err := json.Unmarshal(body, &req); err != nil {
+					logger.Error(errors.Wrap(err, "failed to unmarshal ws-teardown"))
+					return
+				}
+
+				p.wsLock.Lock()
+				c := p.ws[req.ID]
+
+				c.Close()
+				delete(p.ws, req.ID)
+
+				p.wsLock.Unlock()
 			}
 		}()
 	}

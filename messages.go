@@ -93,3 +93,68 @@ func NewPing() *Ping {
 		},
 	}
 }
+
+type WSRequest struct {
+	document.Base
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+}
+
+func NewWSRequest(url string) *WSRequest {
+	return &WSRequest{
+		Base: document.Base{
+			ID:        uuid.Must(uuid.NewV4()).String(),
+			Type:      SchemaBase + "/ws-request.json",
+			Timestamp: time.Now().UTC(),
+		},
+		URL:     url,
+		Headers: make(map[string]string),
+	}
+}
+
+type WSResponse struct {
+	document.Base
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func NewWSResponse(id string, ok bool) *WSResponse {
+	return &WSResponse{
+		Base: document.Base{
+			ID:        id,
+			Type:      SchemaBase + "/ws-response.json",
+			Timestamp: time.Now().UTC(),
+		},
+		OK: ok,
+	}
+}
+
+type WSMessage struct {
+	document.Base
+	MessageType int    `json:"messageType"`
+	Body        string `json:"body"`
+}
+
+func NewWSMessage(id string) *WSMessage {
+	return &WSMessage{
+		Base: document.Base{
+			ID:        id,
+			Type:      SchemaBase + "/ws-message.json",
+			Timestamp: time.Now().UTC(),
+		},
+	}
+}
+
+type WSTeardown struct {
+	document.Base
+}
+
+func NewWSTeardown(id string) *WSTeardown {
+	return &WSTeardown{
+		Base: document.Base{
+			ID:        id,
+			Type:      SchemaBase + "/ws-teardown.json",
+			Timestamp: time.Now().UTC(),
+		},
+	}
+}

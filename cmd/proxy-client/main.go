@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -12,7 +13,9 @@ import (
 	crypto "github.com/Brickchain/go-crypto.v2"
 	logger "github.com/Brickchain/go-logger.v1"
 	"github.com/Brickchain/go-proxy.v1/pkg/client"
+	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	jose "gopkg.in/square/go-jose.v1"
 )
@@ -98,59 +101,143 @@ type state struct {
 
 type httpClient struct{}
 
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
 func (h *httpClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.Debugf("Request for %s%s", r.Host, r.URL.Path)
 
-	req, err := http.NewRequest(r.Method, fmt.Sprintf("%s%s", viper.GetString("local"), r.URL.Path), r.Body)
-	if err != nil {
-		logger.Error(err)
-		return
-	}
+	// This is a websocket upgrade request, so let's setup a websocket client towards that same path on HomeAssistant and proxy the messages
+	if strings.ToLower(r.Header.Get("Connection")) == "upgrade" && strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
 
-	for k, v := range r.Header {
-		switch strings.ToUpper(k) {
-		case "DNT":
-			continue
-		case "UPGRADE-INSECURE-REQUESTS":
-			continue
-		default:
-			req.Header.Set(k, v[0])
+		respHeaders := make(http.Header)
+		respHeaders.Add("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+		conn, err := upgrader.Upgrade(w, r, respHeaders)
+		if err != nil {
+			http.Error(w, errors.Wrap(err, "failed to upgrade to websocket").Error(), http.StatusInternalServerError)
+			return
 		}
-	}
-	if viper.GetString("local_url") != "" {
-		req.Header.Set("Host", viper.GetString("local_url"))
+		defer conn.Close()
+
+		// Build local address
+		host := strings.Replace(strings.Replace(viper.GetString("local"), "https://", "", 1), "http://", "", 1)
+		schema := "ws"
+		if strings.HasPrefix(viper.GetString("local"), "https://") {
+			schema = "wss"
+		}
+		u := url.URL{Scheme: schema, Host: host, Path: r.URL.Path}
+
+		// Remove headers that we should not forward
+		headers := http.Header{}
+		for k, v := range r.Header {
+			switch strings.ToUpper(k) {
+			case "CONNECTION":
+			case "UPGRADE":
+			case "SEC-WEBSOCKET-KEY":
+			case "SEC-WEBSOCKET-VERSION":
+			case "SEC-WEBSOCKET-EXTENSIONS":
+			default:
+				headers.Set(k, v[0])
+			}
+		}
+
+		// Dial the local websocket
+		clientConn, _, err := websocket.DefaultDialer.Dial(u.String(), headers)
+		if err != nil {
+			logger.Error(err)
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer clientConn.Close()
+
+		// Read upstream messages and write to local websocket
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					typ, body, err := conn.ReadMessage()
+					if err != nil {
+						logger.Error(err)
+						return
+					}
+
+					if err := clientConn.WriteMessage(typ, body); err != nil {
+						logger.Error(err)
+						return
+					}
+				}
+				time.Sleep(time.Millisecond * 10)
+			}
+		}()
+
+		// Read messages from local websocket and forward to upstream
+		for {
+			typ, body, err := clientConn.ReadMessage()
+			if err != nil {
+				logger.Error(err)
+				return
+			}
+
+			if err := conn.WriteMessage(typ, body); err != nil {
+				logger.Error(err)
+				return
+			}
+			time.Sleep(time.Millisecond * 10)
+		}
 	} else {
-		req.Header.Set("Host", r.Host)
-	}
+		req, err := http.NewRequest(r.Method, fmt.Sprintf("%s%s", viper.GetString("local"), r.URL.Path), r.Body)
+		if err != nil {
+			logger.Error(err)
+			return
+		}
 
-	client := &http.Client{
-		Timeout: time.Second * 15,
-	}
+		for k, v := range r.Header {
+			switch strings.ToUpper(k) {
+			case "DNT":
+				continue
+			case "UPGRADE-INSECURE-REQUESTS":
+				continue
+			default:
+				req.Header.Set(k, v[0])
+			}
+		}
+		if viper.GetString("local_url") != "" {
+			req.Header.Set("Host", viper.GetString("local_url"))
+		} else {
+			req.Header.Set("Host", r.Host)
+		}
 
-	res, err := client.Do(req)
-	if err != nil {
-		logger.Error(err)
-		return
-	}
+		client := &http.Client{
+			Timeout: time.Second * 15,
+		}
 
-	for k, v := range res.Header {
-		switch strings.ToUpper(k) {
-		case "DNT":
-			continue
-		case "UPGRADE-INSECURE-REQUESTS":
-			continue
-		default:
+		res, err := client.Do(req)
+		if err != nil {
+			logger.Error(err)
+			return
+		}
+
+		for k, v := range res.Header {
 			w.Header().Set(k, v[0])
 		}
+
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			logger.Error(err)
+			return
+		}
+
+		w.Write(body)
+
+		w.WriteHeader(res.StatusCode)
 	}
-
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		logger.Error(err)
-		return
-	}
-
-	w.Write(body)
-
-	w.WriteHeader(res.StatusCode)
 }

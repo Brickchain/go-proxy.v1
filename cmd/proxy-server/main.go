@@ -76,7 +76,7 @@ func loadHandler() http.Handler {
 	r.GET("/", wrappers.Wrap(api.Version))
 
 	subscribeController := api.NewSubscribeController(viper.GetString("domain"), clients, pubsub)
-	r.GET("/proxy/subscribe", wrappers.Wrap(subscribeController.SubscribeHandler))
+	r.GET("/proxy/subscribe", subscribeController.SubscribeHandler)
 
 	apiHandler := httphandler.LoadMiddlewares(r, version.Version)
 
@@ -90,19 +90,19 @@ func loadHandler() http.Handler {
 	})
 	requestHandler := httphandler.NewRouter()
 	requestController := api.NewRequestController(viper.GetString("domain"), clients, pubsub, limiter)
-	requestHandler.GET("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	requestHandler.POST("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	requestHandler.PUT("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	requestHandler.DELETE("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
-	requestHandler.OPTIONS("/proxy/request/:clientID/*filepath", wrappers.Wrap(requestController.Handle))
+	requestHandler.GET("/proxy/request/:clientID/*filepath", requestController.Handle)
+	requestHandler.POST("/proxy/request/:clientID/*filepath", requestController.Handle)
+	requestHandler.PUT("/proxy/request/:clientID/*filepath", requestController.Handle)
+	requestHandler.DELETE("/proxy/request/:clientID/*filepath", requestController.Handle)
+	requestHandler.OPTIONS("/proxy/request/:clientID/*filepath", requestController.Handle)
 
 	domainHandler := httphandler.NewRouter()
 	if viper.GetString("domain") != "" {
-		domainHandler.GET("/*filepath", wrappers.Wrap(requestController.Handle))
-		domainHandler.POST("/*filepath", wrappers.Wrap(requestController.Handle))
-		domainHandler.PUT("/*filepath", wrappers.Wrap(requestController.Handle))
-		domainHandler.DELETE("/*filepath", wrappers.Wrap(requestController.Handle))
-		domainHandler.OPTIONS("/*filepath", wrappers.Wrap(requestController.Handle))
+		domainHandler.GET("/*filepath", requestController.Handle)
+		domainHandler.POST("/*filepath", requestController.Handle)
+		domainHandler.PUT("/*filepath", requestController.Handle)
+		domainHandler.DELETE("/*filepath", requestController.Handle)
+		domainHandler.OPTIONS("/*filepath", requestController.Handle)
 	}
 
 	return &requestRouter{

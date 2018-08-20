@@ -10,10 +10,12 @@ import (
 	"strings"
 	"time"
 
-	httphandler "github.com/Brickchain/go-httphandler.v2"
+	document "github.com/Brickchain/go-document.v2"
+	logger "github.com/Brickchain/go-logger.v1"
 	proxy "github.com/Brickchain/go-proxy.v1"
 	"github.com/Brickchain/go-proxy.v1/pkg/server/clients"
 	pubsub "github.com/Brickchain/go-pubsub.v1"
+	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
 	"github.com/ulule/limiter"
 )
@@ -34,12 +36,12 @@ func NewRequestController(domain string, clients *clients.ClientService, pubsub 
 	}
 }
 
-func (s *RequestController) Handle(req httphandler.Request) httphandler.Response {
-	clientID := req.Params().ByName("clientID")
+func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	clientID := params.ByName("clientID")
 
 	// If domain is set and the request was for a host that has our domain as suffix we will strip away the domain and use the rest as the clientID
 	if s.domain != "" {
-		host := req.OriginalRequest().Host
+		host := r.Host
 		if strings.HasSuffix(host, "."+s.domain) {
 			clientID = strings.Replace(host, "."+s.domain, "", 1)
 		}
@@ -47,75 +49,238 @@ func (s *RequestController) Handle(req httphandler.Request) httphandler.Response
 
 	_, err := s.clients.Get(clientID)
 	if err != nil {
-		return httphandler.NewErrorResponse(http.StatusBadGateway, errors.Wrap(err, "failed to get client"))
+		http.Error(w, errors.Wrap(err, "failed to get client").Error(), http.StatusBadGateway)
+		return
 	}
 
-	limit, err := s.limiter.Get(req.Context(), clientID)
+	limit, err := s.limiter.Get(r.Context(), clientID)
 	if err != nil {
-		return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to get limit"))
+		http.Error(w, errors.Wrap(err, "failed to get limit").Error(), http.StatusInternalServerError)
+		return
 	}
 
 	if limit.Reached {
-		return httphandler.NewEmptyResponse(http.StatusTooManyRequests)
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
+		return
 	}
 
-	headers := make(map[string]string)
-	for k, v := range req.Header() {
-		headers[k] = v[0]
-	}
-	// headers["Host"] = req.OriginalRequest().Host
-
-	msg := proxy.NewHttpRequest(req.Params().ByName("filepath"))
-	msg.Headers = headers
-	msg.Method = req.OriginalRequest().Method
-
-	data, err := ioutil.ReadAll(io.LimitReader(req.OriginalRequest().Body, 1024*500))
-	if err == nil {
-		if err := req.OriginalRequest().Body.Close(); err != nil {
-			return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to close body"))
+	if strings.ToLower(r.Header.Get("Connection")) == "upgrade" && strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
+		respHeaders := make(http.Header)
+		respHeaders.Add("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+		conn, err := upgrader.Upgrade(w, r, respHeaders)
+		if err != nil {
+			http.Error(w, errors.Wrap(err, "failed to upgrade to websocket").Error(), http.StatusInternalServerError)
+			return
 		}
-		msg.Body = base64.StdEncoding.EncodeToString(data)
+		defer conn.Close()
+
+		msg := proxy.NewWSRequest(params.ByName("filepath"))
+		msg.Headers = make(map[string]string)
+		for k, v := range r.Header {
+			switch strings.ToUpper(k) {
+			case "CONNECTION":
+			case "UPGRADE":
+			case "SEC-WEBSOCKET-KEY":
+			case "SEC-WEBSOCKET-VERSION":
+			case "SEC-WEBSOCKET-EXTENSIONS":
+			default:
+				msg.Headers[k] = v[0]
+			}
+		}
+
+		body, _ := json.Marshal(msg)
+
+		sub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/ws-responses/%s", msg.ID))
+		if err != nil {
+			http.Error(w, errors.Wrap(err, "failed to setup response listener").Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
+			http.Error(w, errors.Wrap(err, "failed to send").Error(), http.StatusInternalServerError)
+			return
+		}
+
+		respString, i := sub.Pull(time.Second * 10)
+		if i == pubsub.TIMEOUT {
+			http.Error(w, "timeout", http.StatusGatewayTimeout)
+			return
+		}
+		if i == pubsub.ERROR {
+			http.Error(w, "error", http.StatusInternalServerError)
+			return
+		}
+
+		resp := &proxy.WSResponse{}
+		if err := json.Unmarshal([]byte(respString), &resp); err != nil {
+			http.Error(w, errors.Wrap(err, "failed to unmarshal response").Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if !resp.OK {
+			http.Error(w, resp.Error, http.StatusInternalServerError)
+			conn.Close()
+			return
+		}
+		sub.Stop(time.Millisecond * 500)
+
+		msgSub, err := s.pubsub.Subscribe(msg.ID, fmt.Sprintf("/proxy/ws-out/%s", msg.ID))
+		if err != nil {
+			http.Error(w, errors.Wrap(err, "failed to setup msg listener").Error(), http.StatusInternalServerError)
+			return
+		}
+		defer msgSub.Stop(time.Second * 1)
+
+		done := make(chan bool)
+		teardown := make(chan bool)
+		go func() {
+			defer func() {
+				teardown <- true
+			}()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					mString, i := msgSub.Pull(time.Second * 10)
+					if i == pubsub.ERROR {
+						return
+					}
+					if i == pubsub.TIMEOUT {
+						time.Sleep(time.Millisecond * 10)
+						continue
+					}
+
+					b := document.Base{}
+					if err := json.Unmarshal([]byte(mString), &b); err != nil {
+						logger.Error(err)
+						continue
+					}
+
+					switch b.Type {
+					case proxy.SchemaBase + "/ws-message.json":
+						m := proxy.WSMessage{}
+						if err := json.Unmarshal([]byte(mString), &m); err != nil {
+							logger.Error(err)
+							continue
+						}
+
+						if err := conn.WriteMessage(m.MessageType, []byte(m.Body)); err != nil {
+							logger.Error(err)
+							return
+						}
+					case proxy.SchemaBase + "/ws-teardown.json":
+						logger.Info("Shutting down connection")
+						conn.Close()
+						return
+					}
+
+				}
+
+				time.Sleep(time.Millisecond * 10)
+			}
+		}()
+
+		defer func() {
+			done <- true
+
+			m := proxy.NewWSTeardown(msg.ID)
+			b, _ := json.Marshal(m)
+
+			if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(b)); err != nil {
+				logger.Error(err)
+				return
+			}
+		}()
+		for {
+			select {
+			case <-teardown:
+				return
+			default:
+				typ, body, err := conn.ReadMessage()
+				if err != nil {
+					logger.Error("got error while reading message", err)
+					return
+				}
+
+				m := proxy.NewWSMessage(msg.ID)
+				m.MessageType = typ
+				m.Body = string(body)
+
+				b, _ := json.Marshal(m)
+
+				if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(b)); err != nil {
+					http.Error(w, errors.Wrap(err, "failed to send").Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			time.Sleep(time.Millisecond * 10)
+		}
+	} else {
+
+		msg := proxy.NewHttpRequest(params.ByName("filepath"))
+		msg.Headers = make(map[string]string)
+		for k, v := range r.Header {
+			msg.Headers[k] = v[0]
+		}
+		msg.Method = r.Method
+
+		data, err := ioutil.ReadAll(io.LimitReader(r.Body, 1024*500))
+		if err == nil {
+			if err := r.Body.Close(); err != nil {
+				http.Error(w, errors.Wrap(err, "failed to close body").Error(), http.StatusInternalServerError)
+				return
+			}
+			msg.Body = base64.StdEncoding.EncodeToString(data)
+		}
+
+		body, _ := json.Marshal(msg)
+
+		topic := fmt.Sprintf("/proxy/responses/%s", msg.ID)
+		sub, err := s.pubsub.Subscribe(msg.ID, topic)
+		if err != nil {
+			http.Error(w, errors.Wrap(err, "failed to push message").Error(), http.StatusInternalServerError)
+			return
+		}
+		// defer sub.Stop(time.Second * 1)
+		// defer c.pubsub.DeleteTopic(topic)
+
+		if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
+			http.Error(w, errors.Wrap(err, "failed to send").Error(), http.StatusInternalServerError)
+			return
+		}
+
+		respString, i := sub.Pull(time.Second * 10)
+		if i == pubsub.TIMEOUT {
+			http.Error(w, "timeout", http.StatusGatewayTimeout)
+			return
+		}
+		if i == pubsub.ERROR {
+			http.Error(w, "error", http.StatusInternalServerError)
+			return
+		}
+
+		resp := &proxy.HttpResponse{}
+		if err := json.Unmarshal([]byte(respString), &resp); err != nil {
+			logger.Error(errors.Wrap(err, "failed to unmarshal response"))
+			http.Error(w, errors.Wrap(err, "failed to unmarshal response").Error(), http.StatusInternalServerError)
+			return
+		}
+
+		respBody, err := base64.StdEncoding.DecodeString(resp.Body)
+		if err != nil {
+			logger.Error(errors.Wrap(err, "failed to decode response body"))
+			http.Error(w, errors.Wrap(err, "failed to decode response body").Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for k, v := range resp.Headers {
+			w.Header().Set(k, v)
+		}
+
+		w.WriteHeader(resp.Status)
+		w.Write(respBody)
+
 	}
-
-	body, _ := json.Marshal(msg)
-
-	topic := fmt.Sprintf("/proxy/responses/%s", msg.ID)
-	sub, err := s.pubsub.Subscribe(msg.ID, topic)
-	if err != nil {
-		return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to push message"))
-	}
-	// defer sub.Stop(time.Second * 1)
-	// defer c.pubsub.DeleteTopic(topic)
-
-	if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
-		return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to send"))
-	}
-
-	respString, i := sub.Pull(time.Second * 10)
-	if i == pubsub.TIMEOUT {
-		return httphandler.NewErrorResponse(http.StatusGatewayTimeout, errors.New("timeout"))
-	}
-	if i == pubsub.ERROR {
-		return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.New("error"))
-	}
-
-	resp := &proxy.HttpResponse{}
-	if err := json.Unmarshal([]byte(respString), &resp); err != nil {
-		return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to unmarshal response"))
-	}
-
-	respBody, err := base64.StdEncoding.DecodeString(resp.Body)
-	if err != nil {
-		return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to decode response body"))
-	}
-
-	r := httphandler.NewStandardResponse(resp.Status, resp.ContentType, respBody)
-
-	for k, v := range resp.Headers {
-		// if k != "Content-Type" && k != "Access-Control-Allow-Origin" && k != "Server" {
-		r.Header().Set(k, v)
-		// }
-	}
-
-	return r
 }

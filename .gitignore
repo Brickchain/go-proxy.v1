@@ -1,3 +1,5 @@
 *.pem
 debug
 *.json
+cmd/ws-server
+cmd/ws-client
