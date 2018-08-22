@@ -71,7 +71,7 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		client := server.NewClient(key)
+		client := server.NewClient(key, r.Session)
 		if err := c.clients.Set(client); err != nil {
 			conn.WriteMessage(websocket.TextMessage, []byte(err.Error()))
 			logger.Error(err)

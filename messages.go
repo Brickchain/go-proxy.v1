@@ -51,6 +51,7 @@ func NewHttpResponse(id string, status int) *HttpResponse {
 type RegistrationRequest struct {
 	document.Base
 	MandateToken string `json:"mandateToken"`
+	Session      string `json:"session,omitempty"`
 }
 
 func NewRegistrationRequest(mandateToken string) *RegistrationRequest {
