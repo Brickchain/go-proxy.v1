@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	hash "crypto"
 
 	crypto "github.com/Brickchain/go-crypto.v2"
 	logger "github.com/Brickchain/go-logger.v1"
@@ -99,14 +102,16 @@ func (p *ProxyClient) write(b []byte) error {
 
 func (p *ProxyClient) Register(key *jose.JsonWebKey) (string, error) {
 
-	p.id = crypto.Thumbprint(key)
+	b, _ := key.Thumbprint(hash.SHA256)
+	p.id = strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
+
 	p.key = key
 
 	p.regDone.Wait()
 
 	// time.Sleep(time.Second * 3)
 
-	return p.base, nil
+	return p.base, p.regError
 
 }
 
@@ -245,10 +250,10 @@ func (p *ProxyClient) subscribe() error {
 					if r.Hostname != "" {
 						p.base = r.Hostname
 					}
-					if !p.initialized {
-						p.initialized = true
-						p.regDone.Done()
-					}
+				}
+				if !p.initialized {
+					p.initialized = true
+					p.regDone.Done()
 				}
 
 			case proxy.SchemaBase + "/http-request.json":
