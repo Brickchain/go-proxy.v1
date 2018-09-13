@@ -161,3 +161,17 @@ func NewWSTeardown(id string) *WSTeardown {
 		},
 	}
 }
+
+type Disconnect struct {
+	document.Base
+}
+
+func NewDisconnect() *Disconnect {
+	return &Disconnect{
+		Base: document.Base{
+			ID:        uuid.Must(uuid.NewV4()).String(),
+			Type:      SchemaBase + "/disconnect.json",
+			Timestamp: time.Now().UTC(),
+		},
+	}
+}

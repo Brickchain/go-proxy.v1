@@ -57,27 +57,31 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 	conn, err := upgrader.Upgrade(w, r, respHeaders)
 	if err != nil {
 		http.Error(w, errors.Wrap(err, "failed to upgrade to websocket").Error(), http.StatusInternalServerError)
+		return
 	}
 	defer conn.Close()
 
-	wg := sync.WaitGroup{}
-	// done := make(chan struct{})
+	lock := sync.Mutex{}
+	write := func(msg []byte) error {
+		lock.Lock()
+		defer lock.Unlock()
 
-	// go func() {
-	// 	<-r.Context().Done()
-	// }()
+		return conn.WriteMessage(websocket.TextMessage, msg)
+	}
+
+	wg := sync.WaitGroup{}
 
 	addClient := func(r *proxy.RegistrationRequest) {
 		key, err := parseMandateToken(r.MandateToken)
 		if err != nil {
-			conn.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+			write([]byte(err.Error()))
 			logger.Error(err)
 			return
 		}
 
 		client := server.NewClient(key, r.Session)
 		if err := c.clients.Set(client); err != nil {
-			conn.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+			write([]byte(err.Error()))
 			logger.Error(err)
 			return
 		}
@@ -99,7 +103,7 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 			res.Hostname = fmt.Sprintf("%s.%s", client.ID, c.domain)
 		}
 		resBytes, _ := json.Marshal(res)
-		if err = conn.WriteMessage(websocket.TextMessage, []byte(resBytes)); err != nil {
+		if err = write([]byte(resBytes)); err != nil {
 			cancel()
 			logger.Error(err)
 			return
@@ -109,25 +113,15 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 			select {
 			case <-ctx.Done():
 				return
-			default:
-				msg, ok := sub.Pull(time.Second * 10)
-				switch ok {
-				case pubsub.SUCCESS:
-					if err = conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-						cancel()
-						logger.Error(err)
-						return
-						// return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to write message"))
-					}
-				case pubsub.TIMEOUT:
-					if err = conn.WriteMessage(websocket.TextMessage, []byte("{\"@type\":\"https://proxy.brickchain.com/v1/ping.json\"}\n")); err != nil {
-						cancel()
-						logger.Error(err)
-						return
-						// return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to send ping"))
-					}
-				case pubsub.ERROR:
-					logger.Error("error: ", msg)
+			case <-time.After(time.Second * 10):
+				if err = write([]byte("{\"@type\":\"https://proxy.brickchain.com/v1/ping.json\"}\n")); err != nil {
+					logger.Error(err)
+					cancel()
+					return
+				}
+			case msg := <-sub.Chan():
+				if err = write([]byte(msg)); err != nil {
+					logger.Error(err)
 					cancel()
 					return
 				}
@@ -225,6 +219,9 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 						if err := c.pubsub.Publish(fmt.Sprintf("/proxy/websocket/%s", r.ID), string(body)); err != nil {
 							fmt.Printf("could not publish message: %s\n", err)
 						}
+					case proxy.SchemaBase + "/disconnect.json":
+						cancel()
+						return
 					}
 
 				}()

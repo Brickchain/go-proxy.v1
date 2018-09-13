@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -37,6 +38,10 @@ func NewRequestController(domain string, clients *clients.ClientService, pubsub 
 }
 
 func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	clientID := params.ByName("clientID")
 
 	// If domain is set and the request was for a host that has our domain as suffix we will strip away the domain and use the rest as the clientID
@@ -97,7 +102,7 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 		}
 		defer msgSub.Stop(time.Second * 1)
 
-		done := make(chan bool)
+		// done := make(chan bool)
 		teardown := make(chan bool)
 		go func() {
 			defer func() {
@@ -105,18 +110,9 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 			}()
 			for {
 				select {
-				case <-done:
+				case <-ctx.Done():
 					return
-				default:
-					mString, i := msgSub.Pull(time.Second * 10)
-					if i == pubsub.ERROR {
-						return
-					}
-					if i == pubsub.TIMEOUT {
-						time.Sleep(time.Millisecond * 10)
-						continue
-					}
-
+				case mString := <-msgSub.Chan():
 					b := document.Base{}
 					if err := json.Unmarshal([]byte(mString), &b); err != nil {
 						logger.Error(err)
@@ -148,7 +144,7 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 							return
 						}
 					case proxy.SchemaBase + "/ws-teardown.json":
-						logger.Info("Shutting down connection")
+						cancel()
 						conn.Close()
 						return
 					}
@@ -167,7 +163,7 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 		}
 
 		defer func() {
-			done <- true
+			cancel()
 
 			m := proxy.NewWSTeardown(msg.ID)
 			b, _ := json.Marshal(m)
@@ -179,6 +175,8 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 		}()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-teardown:
 				return
 			default:
@@ -229,7 +227,7 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 			http.Error(w, errors.Wrap(err, "failed to push message").Error(), http.StatusInternalServerError)
 			return
 		}
-		// defer sub.Stop(time.Second * 1)
+		defer sub.Stop(time.Second * 1)
 		// defer c.pubsub.DeleteTopic(topic)
 
 		if err := s.pubsub.Publish(fmt.Sprintf("/proxy/connections/%s", clientID), string(body)); err != nil {
@@ -237,7 +235,7 @@ func (s *RequestController) Handle(w http.ResponseWriter, r *http.Request, param
 			return
 		}
 
-		respString, i := sub.Pull(time.Second * 10)
+		respString, i := sub.Pull(time.Second * 30)
 		if i == pubsub.TIMEOUT {
 			http.Error(w, "timeout", http.StatusGatewayTimeout)
 			return
