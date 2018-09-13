@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Brickchain/go-logger.v1"
-	"gopkg.in/redis.v5"
+	"github.com/go-redis/redis"
 )
 
 type RedisPubSub struct {
@@ -98,13 +97,13 @@ func (s *RedisSubscriber) run() {
 		s.running = false
 	}()
 
-	var err error
-	s.sub, err = s.client.Subscribe(s.topic)
-	if err != nil {
-		logger.Error("Subscription not created...")
-		s.ready <- false
-		return
-	}
+	// var err error
+	s.sub = s.client.Subscribe(s.topic)
+	// if err != nil {
+	// 	logger.Error("Subscription not created...")
+	// 	s.ready <- false
+	// 	return
+	// }
 
 	s.ready <- true
 }

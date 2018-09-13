@@ -1,8 +1,13 @@
-# Redis cache library for Golang [![Build Status](https://travis-ci.org/go-redis/cache.svg?branch=v3)](https://travis-ci.org/go-redis/cache)
+# Redis cache library for Golang
+
+[![Build Status](https://travis-ci.org/go-redis/cache.svg)](https://travis-ci.org/go-redis/cache)
+[![GoDoc](https://godoc.org/github.com/go-redis/cache?status.svg)](https://godoc.org/github.com/go-redis/cache)
 
 ## Installation
 
-    go get gopkg.in/go-redis/cache.v5
+```shell
+go get -u github.com/go-redis/cache
+```
 
 ## Quickstart
 
@@ -14,10 +19,10 @@ import (
 	"fmt"
 	"time"
 
-	"gopkg.in/go-redis/cache.v5"
+	"github.com/go-redis/redis"
+	"github.com/vmihailenco/msgpack"
 
-	"gopkg.in/redis.v5"
-	"gopkg.in/vmihailenco/msgpack.v2"
+	"github.com/go-redis/cache"
 )
 
 type Object struct {
@@ -83,9 +88,10 @@ func Example_advancedUsage() {
 		},
 	}
 
-	v, err := codec.Do(&cache.Item{
+	obj := new(Object)
+	err := codec.Once(&cache.Item{
 		Key:    "mykey",
-		Object: new(Object), // destination
+		Object: obj, // destination
 		Func: func() (interface{}, error) {
 			return &Object{
 				Str: "mystring",
@@ -96,7 +102,7 @@ func Example_advancedUsage() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(v.(*Object))
+	fmt.Println(obj)
 	// Output: &{mystring 42}
 }
 ```

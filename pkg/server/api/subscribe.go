@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,6 +47,9 @@ var upgrader = websocket.Upgrader{
 
 func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	clients := make([]*server.Client, 0)
 
 	respHeaders := make(http.Header)
@@ -57,7 +61,7 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 	defer conn.Close()
 
 	wg := sync.WaitGroup{}
-	done := make(chan struct{})
+	// done := make(chan struct{})
 
 	// go func() {
 	// 	<-r.Context().Done()
@@ -96,35 +100,35 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 		}
 		resBytes, _ := json.Marshal(res)
 		if err = conn.WriteMessage(websocket.TextMessage, []byte(resBytes)); err != nil {
-			close(done)
+			cancel()
 			logger.Error(err)
 			return
 		}
 
 		for {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				return
 			default:
 				msg, ok := sub.Pull(time.Second * 10)
 				switch ok {
 				case pubsub.SUCCESS:
 					if err = conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-						close(done)
+						cancel()
 						logger.Error(err)
 						return
 						// return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to write message"))
 					}
 				case pubsub.TIMEOUT:
 					if err = conn.WriteMessage(websocket.TextMessage, []byte("{\"@type\":\"https://proxy.brickchain.com/v1/ping.json\"}\n")); err != nil {
-						close(done)
+						cancel()
 						logger.Error(err)
 						return
 						// return httphandler.NewErrorResponse(http.StatusInternalServerError, errors.Wrap(err, "failed to send ping"))
 					}
 				case pubsub.ERROR:
 					logger.Error("error: ", msg)
-					close(done)
+					cancel()
 					return
 				}
 
@@ -139,7 +143,7 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 		<-time.After(time.Second * 10)
 		if len(clients) < 1 {
 			logger.Warn("Not authenticated after 10 seconds, dropping connection")
-			close(done)
+			cancel()
 		}
 	}()
 
@@ -148,7 +152,7 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 		defer wg.Done()
 		for {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				return
 			default:
 				_, body, err := conn.ReadMessage()
