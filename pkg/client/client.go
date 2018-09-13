@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	hash "crypto"
 
 	crypto "github.com/Brickchain/go-crypto.v2"
 	logger "github.com/Brickchain/go-logger.v1"
@@ -30,7 +27,6 @@ import (
 
 type ProxyClient struct {
 	base        string
-	id          string
 	url         string
 	endpoint    string
 	proxyDomain string
@@ -38,7 +34,6 @@ type ProxyClient struct {
 	writeLock   *sync.Mutex
 	regError    error
 	regDone     *sync.WaitGroup
-	initialized bool
 	connected   bool
 	handler     http.Handler
 	key         *jose.JsonWebKey
@@ -101,9 +96,6 @@ func (p *ProxyClient) write(b []byte) error {
 }
 
 func (p *ProxyClient) Register(key *jose.JsonWebKey) (string, error) {
-
-	b, _ := key.Thumbprint(hash.SHA256)
-	p.id = strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
 
 	p.key = key
 
@@ -242,19 +234,16 @@ func (p *ProxyClient) subscribe() error {
 				r := &proxy.RegistrationResponse{}
 				if err := json.Unmarshal(body, &r); err != nil {
 					logger.Error(errors.Wrap(err, "failed to unmarshal registration-response"))
+					p.regError = err
 				}
 
-				if r.KeyID != p.id {
-					p.regError = errors.New("Wrong KeyID in registration")
+				if r.Hostname != "" {
+					p.base = r.Hostname
 				} else {
-					if r.Hostname != "" {
-						p.base = r.Hostname
-					}
+					p.regError = errors.New("no host in registration-response")
 				}
-				if !p.initialized {
-					p.initialized = true
-					p.regDone.Done()
-				}
+
+				p.regDone.Done()
 
 			case proxy.SchemaBase + "/http-request.json":
 				p.lastPing = time.Now()
