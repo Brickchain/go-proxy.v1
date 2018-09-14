@@ -16,9 +16,10 @@ type RedisPubSub struct {
 
 func NewRedisPubSub(addr string) (*RedisPubSub, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Addr:        addr,
+		Password:    "", // no password set
+		DB:          0,  // use default DB
+		IdleTimeout: time.Second * 10,
 	})
 
 	_, err := client.Ping().Result()

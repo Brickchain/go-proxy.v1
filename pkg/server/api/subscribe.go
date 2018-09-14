@@ -125,10 +125,10 @@ func (c *SubscribeController) SubscribeHandler(w http.ResponseWriter, r *http.Re
 					cancel()
 					return
 				}
+			}
 
-				if err := c.clients.RenewTTL(client.ID); err != nil {
-					logger.Errorf("failed to renew TTL for %s: %s", client.ID, err)
-				}
+			if err := c.clients.RenewTTL(client.ID); err != nil {
+				logger.Errorf("failed to renew TTL for %s: %s", client.ID, err)
 			}
 		}
 	}
