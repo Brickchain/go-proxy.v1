@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	crypto "github.com/Brickchain/go-crypto.v2"
@@ -91,6 +93,15 @@ func main() {
 			}
 		}
 	}
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigs
+		fmt.Println()
+		fmt.Println(sig)
+		p.Disconnect()
+	}()
 
 	p.Wait()
 }

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	rediscache "gopkg.in/go-redis/cache.v5"
-	redis "gopkg.in/redis.v5"
+	rediscache "github.com/go-redis/cache"
+	redis "github.com/go-redis/redis"
 	"gopkg.in/vmihailenco/msgpack.v2"
 )
 

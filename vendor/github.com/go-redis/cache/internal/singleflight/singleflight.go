@@ -16,7 +16,7 @@ limitations under the License.
 
 // Package singleflight provides a duplicate function call suppression
 // mechanism.
-package singleflight // import "go4.org/syncutil/singleflight"
+package singleflight
 
 import "sync"
 

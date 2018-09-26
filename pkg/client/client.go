@@ -40,8 +40,9 @@ type ProxyClient struct {
 	key         *jose.JsonWebKey
 	lastPing    time.Time
 	wg          sync.WaitGroup
-	ws          map[string]*websocket.Conn
+	ws          map[string]*wsConn
 	wsLock      *sync.Mutex
+	disconnect  bool
 }
 
 func NewProxyClient(endpoint string) (*ProxyClient, error) {
@@ -52,11 +53,9 @@ func NewProxyClient(endpoint string) (*ProxyClient, error) {
 		lastPing:  time.Now(),
 		regDone:   &sync.WaitGroup{},
 		wg:        sync.WaitGroup{},
-		ws:        make(map[string]*websocket.Conn),
+		ws:        make(map[string]*wsConn),
 		wsLock:    &sync.Mutex{},
 	}
-
-	p.regDone.Add(1)
 
 	go p.subscribe()
 
@@ -100,7 +99,7 @@ func (p *ProxyClient) Register(key *jose.JsonWebKey) (string, error) {
 
 	p.key = key
 
-	p.regDone.Wait()
+	p.register()
 
 	// time.Sleep(time.Second * 3)
 
@@ -137,6 +136,7 @@ func (p *ProxyClient) register() error {
 	regReq := proxy.NewRegistrationRequest(jwsCompact)
 	regReqBytes, _ := json.Marshal(regReq)
 
+	p.regDone.Add(1)
 	if err := p.write(regReqBytes); err != nil {
 		return err
 	}
@@ -188,24 +188,23 @@ func (p *ProxyClient) subscribe() error {
 	}()
 
 	for {
+		if p.disconnect {
+			return nil
+		}
+
 		if !p.connected {
-			// logger.Debug("Connecting to proxy...")
 			if err := p.connect(); err != nil {
 				logger.Error(errors.Wrap(err, "failed to connect to proxy"))
 				disconnect()
 				time.Sleep(time.Second * 10)
 				continue
 			}
-			// logger.Debug("Connected!")
 
 			if p.key != nil {
 				go func() {
-					// logger.Debug("Registering to proxy...")
 					if err := p.register(); err != nil {
 						logger.Error(errors.Wrap(err, "failed to register to proxy"))
 						disconnect()
-					} else {
-						// logger.Debug("Registered!")
 					}
 				}()
 			}
@@ -217,7 +216,6 @@ func (p *ProxyClient) subscribe() error {
 			disconnect()
 			continue
 		}
-		// logger.Infof("recv: %s", body)
 
 		go func() {
 			docType, err := document.GetType(body)
@@ -372,8 +370,13 @@ func (p *ProxyClient) subscribe() error {
 					return
 				}
 
+				conn := &wsConn{
+					conn: c,
+					lock: &sync.Mutex{},
+				}
+
 				p.wsLock.Lock()
-				p.ws[req.ID] = c
+				p.ws[req.ID] = conn
 				p.wsLock.Unlock()
 
 				b, _ := json.Marshal(proxy.NewWSResponse(req.ID, true))
@@ -385,7 +388,7 @@ func (p *ProxyClient) subscribe() error {
 				}
 
 				for {
-					typ, body, err := c.ReadMessage()
+					typ, body, err := conn.conn.ReadMessage()
 					if err != nil {
 						logger.Errorf("got error while reading message: %s", err)
 
@@ -437,10 +440,10 @@ func (p *ProxyClient) subscribe() error {
 					return
 				}
 
-				if err = c.WriteMessage(req.MessageType, []byte(req.Body)); err != nil {
+				if err = c.write([]byte(req.Body)); err != nil {
 					fmt.Printf("got error while writing message: %s\n", err)
 
-					c.Close()
+					c.conn.Close()
 
 					p.wsLock.Lock()
 					delete(p.ws, req.ID)
@@ -470,7 +473,7 @@ func (p *ProxyClient) subscribe() error {
 				c := p.ws[req.ID]
 
 				if c != nil {
-					c.Close()
+					c.conn.Close()
 				}
 				delete(p.ws, req.ID)
 
@@ -480,10 +483,32 @@ func (p *ProxyClient) subscribe() error {
 	}
 }
 
+func (p *ProxyClient) Disconnect() error {
+
+	t := proxy.NewDisconnect()
+	b, _ := json.Marshal(t)
+	p.write(b)
+
+	p.disconnect = true
+	return p.conn.Close()
+}
+
 type nopCloser struct {
 	io.Reader
 }
 
 func (nopCloser) Close() error {
 	return nil
+}
+
+type wsConn struct {
+	conn *websocket.Conn
+	lock *sync.Mutex
+}
+
+func (w *wsConn) write(msg []byte) error {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	return w.conn.WriteMessage(websocket.TextMessage, msg)
 }

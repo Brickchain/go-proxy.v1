@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Brickchain/go-logger.v1"
-	"gopkg.in/redis.v5"
+	logger "github.com/Brickchain/go-logger.v1"
+	"github.com/go-redis/redis"
+	"golang.org/x/net/context"
 )
 
 type RedisPubSub struct {
@@ -18,6 +19,7 @@ func NewRedisPubSub(addr string) (*RedisPubSub, error) {
 		Addr:     addr,
 		Password: "", // no password set
 		DB:       0,  // use default DB
+		// IdleTimeout: time.Second * 10,
 	})
 
 	_, err := client.Ping().Result()
@@ -56,31 +58,22 @@ type RedisSubscriber struct {
 	topic   string
 	sub     *redis.PubSub
 	output  chan string
-	done    chan bool
+	ctx     context.Context
+	cancel  func()
 	ready   chan bool
 	running bool
 }
 
 func (r *RedisPubSub) Subscribe(group, topic string) (Subscriber, error) {
-
-	client := redis.NewClient(&redis.Options{
-		Addr:     r.addr,
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-
-	_, err := client.Ping().Result()
-	if err != nil {
-		return nil, err
-	}
-
 	s := RedisSubscriber{
-		client: client,
+		client: r.client,
 		topic:  topic,
 		output: make(chan string, 100),
-		done:   make(chan bool),
 		ready:  make(chan bool),
 	}
+
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
 	go s.run()
 
 	// wait for subscriber to tell us it's ready
@@ -98,38 +91,38 @@ func (s *RedisSubscriber) run() {
 		s.running = false
 	}()
 
-	var err error
-	s.sub, err = s.client.Subscribe(s.topic)
+	s.sub = s.client.Subscribe(s.topic)
+
+	_, err := s.sub.Receive()
 	if err != nil {
-		logger.Error("Subscription not created...")
+		logger.Error(err)
 		s.ready <- false
 		return
 	}
+
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				close(s.output)
+				return
+			case m := <-s.sub.Channel():
+				if m != nil && s.output != nil {
+					s.output <- m.Payload
+				}
+			}
+		}
+	}()
 
 	s.ready <- true
 }
 
 func (s *RedisSubscriber) Pull(timeout time.Duration) (string, int) {
-	end := time.Now().Add(timeout)
-
-	for {
-		m, err := s.sub.ReceiveTimeout(end.Sub(time.Now()))
-		if err != nil {
-			return "", TIMEOUT
-		}
-
-		switch msg := m.(type) {
-		case *redis.Subscription:
-			// Ignore.
-		case *redis.Pong:
-			// Ignore.
-		case *redis.Message:
-			return msg.Payload, SUCCESS
-		}
-
-		if time.Now().After(end) {
-			return "", TIMEOUT
-		}
+	select {
+	case m := <-s.Chan():
+		return m, SUCCESS
+	case <-time.After(timeout):
+		return "", TIMEOUT
 	}
 }
 
@@ -138,5 +131,7 @@ func (s *RedisSubscriber) Chan() chan string {
 }
 
 func (s *RedisSubscriber) Stop(timeout time.Duration) {
-	s.done <- true
+	s.sub.Unsubscribe(s.topic)
+	s.cancel()
+	s.sub.Close()
 }
