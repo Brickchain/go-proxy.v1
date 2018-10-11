@@ -34,7 +34,6 @@ type ProxyClient struct {
 	writeLock   *sync.Mutex
 	regError    error
 	regDone     *sync.WaitGroup
-	initialized bool
 	connected   bool
 	handler     http.Handler
 	key         *jose.JsonWebKey
@@ -242,10 +241,7 @@ func (p *ProxyClient) subscribe() error {
 					p.regError = errors.New("no host in registration-response")
 				}
 
-				if !p.initialized {
-					p.initialized = true
-					p.regDone.Done()
-				}
+				p.regDone.Done()
 
 			case proxy.SchemaBase + "/http-request.json":
 				p.lastPing = time.Now()
