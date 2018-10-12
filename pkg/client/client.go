@@ -96,9 +96,7 @@ func (p *ProxyClient) write(b []byte) error {
 
 func (p *ProxyClient) Register(key *jose.JsonWebKey) (string, error) {
 
-	p.key = key
-
-	p.register()
+	p.register(key)
 
 	// time.Sleep(time.Second * 3)
 
@@ -106,7 +104,7 @@ func (p *ProxyClient) Register(key *jose.JsonWebKey) (string, error) {
 
 }
 
-func (p *ProxyClient) register() error {
+func (p *ProxyClient) register(key *jose.JsonWebKey) error {
 
 	for {
 		if p.connected {
@@ -145,6 +143,7 @@ func (p *ProxyClient) register() error {
 		return p.regError
 	}
 
+	p.key = key
 	// p.base = fmt.Sprintf("%s.%s", p.id, p.proxyDomain)
 
 	return nil
@@ -201,7 +200,7 @@ func (p *ProxyClient) subscribe() error {
 
 			if p.key != nil {
 				go func() {
-					if err := p.register(); err != nil {
+					if err := p.register(p.key); err != nil {
 						logger.Error(errors.Wrap(err, "failed to register to proxy"))
 						disconnect()
 					}
