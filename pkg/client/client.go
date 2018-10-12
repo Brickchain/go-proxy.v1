@@ -118,7 +118,7 @@ func (p *ProxyClient) register(key *jose.JsonWebKey) error {
 
 	b, _ := json.Marshal(mandateToken)
 
-	signer, err := crypto.NewSigner(p.key)
+	signer, err := crypto.NewSigner(key)
 	if err != nil {
 		return err
 	}
